@@ -1,0 +1,127 @@
+#!/usr/bin/env node
+
+const
+    {inspect} = require('util'),
+    {spawn} = require('child_process'),
+    argParse = require('arg'),
+    {createProxyServer} = require('http-proxy'),
+    {fromEntries} = Object
+
+
+const {
+    _: [target, port],
+    '--header': rawHeaders = [],
+} =
+    argParse({
+        '--header': [String],
+        '-H': '--header',
+    })
+
+if (!target) {
+    console.error(
+        '\n',
+        'Usage: \n',
+        '  qpx <target> <local-port> [-H <extra-header>]...\n',
+        '\n',
+        'Example: \n',
+        '  qpx https://asdf.com 8080 -H \'foo: bar\' -H \'lorem: ipsum\'',
+        '\n',
+    )
+
+    process.exit(1)
+}
+
+const extraHeaders = {
+    host: target.replace(/^https?:\/\//, ''),
+    ...fromEntries(rawHeaders.map(h => h.split(': '))),
+}
+
+
+createProxyServer({
+    target,
+    headers: extraHeaders,
+})
+    .listen(port)
+
+    .on('proxyReq', async (proxyReq, req) =>
+        logObj('>', {
+            host: target,
+            path: proxyReq.path,
+            method: proxyReq.method,
+            headers: {...req.headers, ...extraHeaders},
+            body: (await readFormattedBody(req)),
+        })
+    )
+
+    .on('proxyRes', async proxyRes =>
+        logObj('<', {
+            statusCode: proxyRes.statusCode,
+            headers: proxyRes.headers,
+            body: (await readFormattedBody(proxyRes)),
+        })
+    )
+
+const logObj = (description, obj) =>
+    console.error(
+        description,
+
+        inspect(obj, {
+            showHidden: false,
+            depth: null,
+        }),
+    )
+
+const readFormattedBody = async msg => {
+    const
+        rawBody = await readStream(msg),
+
+        decompressedBody =
+            await decompress(rawBody, msg.headers['content-encoding']),
+
+        body = decompressedBody.toString('utf8'),
+
+        formattedBody = formatBody(body, msg.headers['content-type'])
+
+    return formattedBody
+}
+
+const readStream = stream =>
+    new Promise((resolve, reject) => {
+        const chunks = []
+
+        stream
+            .on('error', reject)
+            .on('data', chunk => chunks.push(chunk))
+            .on('end', () => resolve(Buffer.concat(chunks)))
+    })
+
+const decompress = async (input, encoding) => {
+    const cmd = compressCmds[encoding]
+
+    if (!cmd)
+        return input
+
+    const ps = spawn(cmd, ['-d'])
+
+    ps.stdin.write(input)
+    ps.stdin.end()
+
+    return await readStream(ps.stdout)
+}
+
+const compressCmds = {
+    deflate: 'gzip',
+    gzip: 'gzip',
+    br: 'brotli',
+}
+
+const formatBody = (text, contentType) => {
+    try {
+        if (contentType.startsWith('application/json'))
+            return JSON.parse(text)
+
+        throw null
+    } catch (e) {
+        return text
+    }
+}
