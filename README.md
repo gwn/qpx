@@ -1,6 +1,6 @@
 ## qpx: Quick Proxy
 
-Very simple forward proxy.
+Very simple forward proxy with detailed logging.
 
 
 Install:
@@ -14,3 +14,7 @@ Usage:
 Example:
 
     qpx https://asdf.com 8080 -H 'foo: bar' -H 'lorem: ipsum'
+
+    curl http://localhost:8080/kittens/42
+
+    # Enjoy
